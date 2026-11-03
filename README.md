@@ -15,14 +15,14 @@ Scope: Great Britain only. Rates marked EXAMPLE must be checked on the UK Trade 
 
 ## Turn on d1
 
-1. Create an account and an API key on Liquid AI's developer platform (docs.liquid.ai). d1 has a free tier (reported as `d1:free`). Even the paid price is about $0.02 per million input tokens, so a whole demo costs well under one cent.
+1. Create an account and an API key on Liquid AI's developer platform (docs.liquid.ai). There's no free tier, but the starting credit covers the demo: about $0.02 per million input tokens, so a whole demo costs well under one cent.
 2. In Prefect Horizon, add these environment variables to the server:
    - `D1_API_KEY` = your key
-   - `D1_MODEL` = the model name your account shows for the free tier (e.g. `d1:free`), or `d1`
+   - `D1_MODEL` = `d1`
    - `D1_API_URL` only if your docs show a different address than `https://api.liquid.ai/decisions/v1/systemone`
 3. Redeploy.
 
-**If you get access another way:** OpenRouter (model `liquid/d1`) and Vercel AI Gateway also serve d1 with the same question format. Set `D1_API_URL` and `D1_MODEL` to their values.
+**If you get access another way:** AI/ML API (`https://api.aimlapi.com/v1/decisions`, model `liquid/d1`), OpenRouter and Vercel AI Gateway also serve d1. Set `D1_API_URL` and `D1_MODEL` to their values, and check their docs first, because the request format may differ from Liquid's own API.
 
 **Check that it works:** the `classify` result shows `"d1_configured": true`, and each judgment says `"engine": "d1"`. If it says `rules` with a note "d1 unavailable (...)", the note tells you why (wrong key, URL or model name).
 

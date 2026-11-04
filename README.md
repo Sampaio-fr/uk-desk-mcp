@@ -4,7 +4,7 @@ Small MCP server for the **UK Desk** agent (DTU course demo).
 
 | Tool | What it does | How it decides |
 |---|---|---|
-| `classify` | Answers typed decision questions with a confidence: a store's UK shipping status, customs code, customer-message intent, return condition, prospect reply intent. Also brand fit and origin claim | **Liquid AI d1** (choice questions on the systemone API) when `D1_API_KEY` is set. Brand fit and origin claim are rules on purpose (a score formula and a legal rule). Without a key, or if d1 fails, rules answer, and each result says `engine: d1` or `engine: rules` |
+| `classify` | Answers typed decision questions with a confidence: a store's UK shipping status, customs code, customer-message intent, return condition, prospect reply intent, HMRC email type (`hmrc_notice`, with a plain-code phishing check first). Also brand fit and origin claim | **Liquid AI d1** (choice questions on the systemone API) when `D1_API_KEY` is set. Brand fit and origin claim are rules on purpose (a score formula and a legal rule). Without a key, or if d1 fails, rules answer, and each result says `engine: d1` or `engine: rules` |
 | `landed_cost` | UK all-in prices per SKU (VAT, duty budget, price points) | Plain code: prices and taxes must be exact |
 | `check_order` | Per order: the £135 rule, duty, statement on origin, REX, DAP mistakes | Plain code |
 | `stage3_check` | Monthly break-even for the shared UK warehouse | Plain code |

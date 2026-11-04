@@ -16,7 +16,7 @@ Tools
 Environment variables (set them in Prefect Horizon):
   D1_API_KEY   your Liquid AI API key (leave empty to use the rules only)
   D1_API_URL   default https://api.liquid.ai/decisions/v1/systemone
-  D1_MODEL     default d1 (use the free model name your account shows, e.g. d1:free)
+  D1_MODEL     default d1
 
 Scope: Great Britain (England, Scotland, Wales). Northern Ireland has different rules.
 Rates marked EXAMPLE must be checked on the UK Trade Tariff before real use.
@@ -352,6 +352,60 @@ def _reply_intent(inp: dict) -> dict:
     return dict(answer="unclear", confidence=0.5, reasons=["no clear intent"], alternatives=[])
 
 
+VAT_NUMBER_RE = re.compile(r"\bGB\s?(\d{3})\s?(\d{4})\s?(\d{2})\b", re.I)
+SCAM_WORDS = ["tax refund", "you are due a refund", "rebate", "claim your refund", "card details",
+              "bank details", "verify your account", "confirm your password", "suspended", "within 24 hours"]
+
+
+def _sender_trusted(inp: dict) -> tuple[bool, str]:
+    """Plain code: is the sender address on a trusted domain (gov.uk) or a configured demo sender?"""
+    sender = str(inp.get("from", "")).strip().lower()
+    m = re.search(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)", sender)
+    addr = m.group(0) if m else sender
+    domain = m.group(1) if m else ""
+    domains = [d.strip().lower() for d in re.split(r"[;,\s]+", str(inp.get("trusted_domains", "gov.uk"))) if d.strip()]
+    extra = [s.strip().lower() for s in re.split(r"[;,\s]+", str(inp.get("trusted_senders", ""))) if s.strip()]
+    ok = addr in extra or any(domain == d or domain.endswith("." + d) for d in domains)
+    return ok, addr
+
+
+def _hmrc_extract(inp: dict) -> dict:
+    t = f"{inp.get('subject', '')} {inp.get('text', '')}"
+    m = VAT_NUMBER_RE.search(t)
+    return {"vat_number_candidate": f"GB{m.group(1)}{m.group(2)}{m.group(3)}"} if m else {}
+
+
+def _hmrc_notice(inp: dict) -> dict:
+    t = f"{inp.get('subject', '')} {inp.get('text', '')}".lower()
+    ok, addr = _sender_trusted(inp)
+    scam = _has(t, SCAM_WORDS)
+    if not ok:
+        return dict(answer="possible_phishing", confidence=0.95,
+                    reasons=[f"sender {addr or 'unknown'} is not on a trusted HMRC domain"]
+                    + ([f"typical scam wording: {', '.join(scam)}"] if scam else []), alternatives=[])
+    if scam:
+        return dict(answer="possible_phishing", confidence=0.8,
+                    reasons=[f"trusted domain but typical scam wording: {', '.join(scam)}"], alternatives=[])
+    if VAT_NUMBER_RE.search(t) or _has(t, ["vat registration number", "your vat number", "registration certificate",
+                                            "you are now registered", "has been registered"]):
+        return dict(answer="vat_number_issued", confidence=0.9, reasons=["mentions the VAT number or certificate"],
+                    alternatives=[{"answer": "new_message_in_account", "confidence": 0.1}])
+    if _has(t, ["more information", "further information", "we need", "please provide", "please send",
+                "evidence", "supporting documents", "we could not", "we cannot process"]):
+        return dict(answer="more_info_requested", confidence=0.88, reasons=["asks for information or evidence"],
+                    alternatives=[{"answer": "new_message_in_account", "confidence": 0.12}])
+    if _has(t, ["refused", "rejected", "cancelled", "not been able to register", "unable to register"]):
+        return dict(answer="rejected_or_problem", confidence=0.85, reasons=["says the application has a problem"],
+                    alternatives=[])
+    if _has(t, ["we have received", "received your application", "acknowledg", "reference number"]):
+        return dict(answer="application_received", confidence=0.86, reasons=["acknowledges the application"],
+                    alternatives=[{"answer": "new_message_in_account", "confidence": 0.14}])
+    if _has(t, ["new message", "sign in to", "online account", "business tax account", "secure message"]):
+        return dict(answer="new_message_in_account", confidence=0.88,
+                    reasons=["notice only: the content is in the HMRC online account"], alternatives=[])
+    return dict(answer="other", confidence=0.5, reasons=["no clear HMRC notice type"], alternatives=[])
+
+
 KINDS = {
     "uk_shipping_status": _uk_shipping_status,
     "brand_fit": _brand_fit,
@@ -360,6 +414,7 @@ KINDS = {
     "message_intent": _message_intent,
     "return_condition": _return_condition,
     "reply_intent": _reply_intent,
+    "hmrc_notice": _hmrc_notice,
 }
 
 
@@ -402,6 +457,17 @@ D1_CHOICES = {
             "not_interested": "Declines.",
             "unsubscribe": "Asks not to be contacted again.",
             "unclear": "The intent is not clear.",
+        },
+    ),
+    "hmrc_notice": (
+        "This email came from HMRC (the UK tax authority) about a company's UK VAT registration. What is it about?",
+        {
+            "new_message_in_account": "A short notice that there is a new message or letter to read in the HMRC online account.",
+            "more_info_requested": "HMRC asks for more information, documents or evidence before it can register the company.",
+            "application_received": "HMRC confirms it received the VAT registration application, or gives a reference number.",
+            "vat_number_issued": "The company is registered: the email gives or mentions the UK VAT number or certificate.",
+            "rejected_or_problem": "HMRC refused, cancelled or cannot process the application.",
+            "other": "Anything else, for example general news or a newsletter.",
         },
     ),
 }
@@ -469,7 +535,10 @@ def _d1_answer(kind: str, inp: dict):
     """Ask d1 when the kind is a judgment. Returns None when d1 is not used for this kind."""
     if kind in D1_CHOICES:
         instructions, options = D1_CHOICES[kind]
-        state = str(inp.get("text") or inp.get("note") or "")
+        if kind == "hmrc_notice":
+            state = f"Subject: {inp.get('subject', '')}\n\n{inp.get('text', '')}"
+        else:
+            state = str(inp.get("text") or inp.get("note") or "")
         out = _d1_choice(instructions, options, state)
         if kind == "message_intent":  # amounts are read with code, not the model
             out["extracted"] = _message_intent(inp).get("extracted", {})
@@ -491,6 +560,18 @@ def _answer(kind: str, inp: dict, engine: str = "auto") -> dict:
         return dict(answer="unknown", confidence=0.0, reasons=[f"unknown kind '{kind}'"], alternatives=[], engine="none")
     inp = inp or {}
     note = None
+    if kind == "hmrc_notice":
+        extracted = _hmrc_extract(inp)  # a VAT number is read with code, never by the model
+        ok, _ = _sender_trusted(inp)
+        rules_out = _hmrc_notice(inp)
+        if not ok or rules_out["answer"] == "possible_phishing":  # sender and scam checks are plain code, before d1
+            return {**rules_out, "extracted": extracted, "engine": "rules"}
+        if engine != "rules" and D1_API_KEY:
+            try:
+                return {**_d1_answer(kind, inp), "extracted": extracted, "engine": "d1"}
+            except Exception as exc:
+                rules_out["reasons"].append(f"d1 unavailable ({type(exc).__name__}: {str(exc)[:120]}); rules used")
+        return {**rules_out, "extracted": extracted, "engine": "rules"}
     if engine != "rules" and D1_API_KEY:
         try:
             out = _d1_answer(kind, inp)
@@ -523,6 +604,11 @@ def classify(questions: list[dict], auto_threshold: float = 0.85, code_threshold
                           (extracted.amount_gbp / amount_dkk when the message names an amount)
       return_condition    {"note", "photo_url"}                  -> resellable | second | write_off
       reply_intent        {"text"}                               -> interested | question | not_interested | unsubscribe | unclear
+      hmrc_notice         {"from", "subject", "text", "trusted_domains", "trusted_senders"}
+                                                                 -> new_message_in_account | more_info_requested | application_received
+                                                                    | vat_number_issued | rejected_or_problem | other | possible_phishing
+                          The sender and scam checks are plain code and run first: an untrusted sender is always
+                          possible_phishing. extracted.vat_number_candidate is read with code when the email shows one.
     Each result has answer, confidence, alternatives, reasons and route ("auto" if confidence
     >= the threshold for that kind, else "human"). customs_code uses code_threshold.
     """

@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">
+<meta name="robots" content="noindex, nofollow">
+<title>Practice VAT Registration</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #ffffff; --ink: #1d2733; --muted: #5b6672; --line: #d9d4ca;
+    --brand: #1f5f5b; --brand-ink: #ffffff; --accent: #c2410c; --error: #b42318; --ok: #1f7a4d;
+    --focus: #f2b705;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  h1:focus { outline: none; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .banner { background: var(--accent); color: #fff; padding: 8px 16px; font-size: 14px; text-align: center; }
+  .banner strong { letter-spacing: .04em; }
+  header { background: var(--brand); color: var(--brand-ink); }
+  header .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; }
+  .logo { font-weight: 700; font-size: 18px; letter-spacing: .01em; }
+  .logo span { opacity: .8; font-weight: 500; }
+  header button { background: transparent; color: var(--brand-ink); border: 1px solid rgba(255,255,255,.6); }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  main .wrap { padding: 24px 16px 48px; }
+  .progress { color: var(--muted); font-size: 14px; margin: 0 0 8px; }
+  section { display: none; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
+  section.active { display: block; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 12px; }
+  h2 { font-size: 20px; margin: 24px 0 8px; }
+  p { margin: 0 0 14px; }
+  .hint { color: var(--muted); font-size: 14px; margin: 2px 0 8px; }
+  .field { margin: 0 0 20px; }
+  label, legend { display: block; font-weight: 600; margin: 0 0 4px; }
+  fieldset { border: 0; margin: 0 0 20px; padding: 0; }
+  .choice { display: flex; align-items: flex-start; gap: 10px; margin: 8px 0; font-weight: 400; }
+  .choice input { margin-top: 4px; width: 20px; height: 20px; flex: none; }
+  .choice label { font-weight: 400; margin: 0; }
+  input[type=text], input[type=password], input[type=email], input[type=tel], input[type=number], input[type=date], textarea, select {
+    width: 100%; padding: 10px 12px; font: inherit; color: var(--ink); background: #fff;
+    border: 2px solid #8a939c; border-radius: 6px; }
+  textarea { min-height: 96px; resize: vertical; }
+  input.short { max-width: 260px; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  button, .button { display: inline-block; font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 6px;
+           border: 0; background: var(--brand); color: var(--brand-ink); cursor: pointer; text-decoration: none; }
+  button.secondary { background: #e7e2d8; color: var(--ink); }
+  button[disabled] { opacity: .45; cursor: not-allowed; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .error-summary { display: none; border: 2px solid var(--error); border-radius: 6px; padding: 12px 14px; margin: 0 0 16px; color: var(--error); }
+  .error-summary.show { display: block; }
+  .field.invalid input, .field.invalid textarea, .field.invalid select, fieldset.invalid { border-color: var(--error); }
+  .field-error { color: var(--error); font-weight: 600; font-size: 14px; margin: 4px 0 0; display: none; }
+  .invalid .field-error { display: block; }
+  .note { background: #f1efe9; border-left: 4px solid var(--brand); padding: 10px 14px; border-radius: 4px; margin: 0 0 16px; font-size: 15px; }
+  .warn { background: #fff4e5; border-left-color: var(--accent); }
+  dl.summary { display: grid; grid-template-columns: minmax(140px, 38%) 1fr auto; gap: 0; margin: 0 0 16px; border-top: 1px solid var(--line); }
+  dl.summary dt, dl.summary dd { margin: 0; padding: 10px 8px 10px 0; border-bottom: 1px solid var(--line); }
+  dl.summary dt { font-weight: 600; }
+  dl.summary dd { overflow-wrap: anywhere; }
+  dl.summary dd.change { text-align: right; }
+  dl.summary .missing { color: var(--error); font-weight: 600; }
+  a.link, button.link { color: var(--brand); background: none; border: 0; padding: 0; font-weight: 600; text-decoration: underline; cursor: pointer; }
+  .ref { font-size: 22px; font-weight: 700; letter-spacing: .04em; background: #eaf5ef; color: var(--ok); padding: 12px 16px; border-radius: 6px; display: inline-block; }
+  footer { color: var(--muted); font-size: 13px; text-align: center; padding: 0 16px 32px; }
+  @media (max-width: 560px) {
+    h1 { font-size: 24px; }
+    section { padding: 18px; }
+    dl.summary { grid-template-columns: 1fr auto; }
+    dl.summary dt { grid-column: 1 / -1; border-bottom: 0; padding-bottom: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="banner"><strong>PRACTICE FORM</strong> · Course demo for UK Desk · Not a government website · Nothing you type here is sent anywhere</div>
+<header>
+  <div class="wrap">
+    <div class="logo">UK Desk <span>· practice VAT registration</span></div>
+    <button type="button" id="signout" hidden>Sign out</button>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+  <p class="progress" id="progress" aria-live="polite"></p>
+
+  <!-- START -->
+  <section data-step="start" data-title="Register a business for VAT (practice)">
+    <h1>Register a business for VAT (practice)</h1>
+    <p>This practice form has the same kind of questions as a UK VAT registration for a business based outside the UK. It lets the UK Desk agent show how it fills in a form, hands sign-in to a person, asks when something is unclear, and stops before submitting.</p>
+    <div class="note warn">This is not HMRC or GOV.UK. Use only the practice sign-in details from the setup guide and made-up personal details. Never enter real passwords or real bank details.</div>
+    <p>You'll need about 10 minutes.</p>
+    <div class="actions"><button type="button" data-go="signin">Start now</button></div>
+  </section>
+
+  <!-- SIGN IN -->
+  <section data-step="signin" data-title="Sign in">
+    <h1>Sign in to continue</h1>
+    <div class="error-summary" role="alert" id="signin-error">Those sign-in details don't match the practice account.</div>
+    <form id="form-signin" novalidate>
+      <div class="field">
+        <label for="userId">User ID</label>
+        <input type="text" id="userId" autocomplete="off" class="short" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="off" class="short" required>
+      </div>
+      <div class="actions"><button type="submit">Sign in</button></div>
+    </form>
+  </section>
+
+  <!-- SECURITY CODE -->
+  <section data-step="code" data-title="Enter your security code">
+    <h1>Enter your security code</h1>
+    <p>We sent a 6-digit code to the phone number linked to the practice account.</p>
+    <div class="error-summary" role="alert" id="code-error">That code is not right. Check it and try again.</div>
+    <form id="form-code" novalidate>
+      <div class="field">
+        <label for="securityCode">Security code</label>
+        <input type="text" id="securityCode" inputmode="numeric" autocomplete="off" class="short" maxlength="6" required>
+      </div>
+      <div class="actions"><button type="submit">Continue</button></div>
+    </form>
+  </section>
+
+  <!-- ESTABLISHMENT -->
+  <section data-step="establishment" data-title="About the business" data-auth>
+    <h1>About the business</h1>
+    <div class="error-summary" role="alert"></div>
+    <form data-save novalidate>
+      <fieldset data-required="establishment">
+        <legend>Where is the business established?</legend>
+        <div class="choice"><input type="radio" name="establishment" id="est-uk" value="In the UK"><label for="est-uk">In the UK</label></div>
+        <div class="choice"><input type="radio" name="establishment" id="est-out" value="Outside the UK, with no UK establishment"><label for="est-out">Outside the UK, with no UK establishment</label></div>
+        <p class="field-error">Select where the business is established</p>
+      </fieldset>
+      <fieldset data-required="businessType">
+        <legend>What type of business is it?</legend>
+        <div class="choice"><input type="radio" name="businessType" id="bt-company" value="Limited company incorporated outside the UK"><label for="bt-company">Limited company incorporated outside the UK</label></div>
+        <div class="choice"><input type="radio" name="businessType" id="bt-sole" value="Sole trader"><label for="bt-sole">Sole trader</label></div>
+        <div class="choice"><input type="radio" name="businessType" id="bt-partnership" value="Partnership"><label for="bt-partnership">Partnership</label></div>
+        <p class="field-error">Select the type of business</p>
+      </fieldset>
+      <div class="actions"><button type="submit">Continue</button></div>
+    </form>
+  </section>
+
+  <!-- COMPANY -->
+  <section data-step="company" data-title="Company details" data-auth>
+    <h1>Company details</h1>
+    <div class="error-summary" role="alert"></div>
+    <form data-save novalidate>
+      <div class="field">
+        <label for="legalName">Company's legal name</label>
+        <p class="hint">As it appears on the company register in its home country</p>
+        <input type="text" id="legalName" name="legalName" required>
+        <p class="field-error">Enter the company's legal name</p>
+      </div>
+      <div class="field">
+        <label for="country">Country where the company is incorporated</label>
+        <input type="text" id="country" name="country" class="short" required>
+        <p class="field-error">Enter the country of incorporation</p>
+      </div>
+      <div class="field">
+        <label for="homeTaxId">Company registration number or tax number in its home country</label>
+        <p class="hint">For example, a Danish CVR number</p>
+        <input type="text" id="homeTaxId" name="homeTaxId" class="short" required>
+        <p class="field-error">Enter the home-country registration or tax number</p>
+      </div>
+      <div class="field">
+        <label for="address">Registered address (principal place of business)</label>
+        <p class="hint">It must be outside the UK and not a third-party address</p>
+        <textarea id="address" name="address" required></textarea>
+        <p class="field-error">Enter the registered address</p>
+      </div>
+      <div class="actions"><button type="submit">Continue</button></div>
+    </form>
+  </section>
+
+  <!-- TRADING -->
+  <section data-step="trading" data-title="UK trading" data-auth>
+    <h1>UK trading</h1>
+    <div class="error-summary" role="alert"></div>
+    <form data-save novalidate>
+      <div class="field">
+        <label for="activity">Describe the business's main activity</label>
+        <p class="hint">What it sells and to whom</p>
+        <textarea id="activity" name="activity" required></textarea>
+        <p class="field-error">Describe the business's main activity</p>
+      </div>
+      <div class="field">
+        <label for="firstSale">Date of the first taxable sale in the UK (or expected date)</label>
+        <p class="hint">This becomes the effective date of registration</p>
+        <input type="date" id="firstSale" name="firstSale" class="short" required>
+        <p class="field-error">Enter the date of the first UK sale</p>
+      </div>
+      <div class="field">
+        <label for="turnover">Expected UK sales in the next 12 months, excluding VAT (£)</label>
+        <input type="number" id="turnover" name="turnover" class="short" min="0" step="1" required>
+        <p class="field-error">Enter the expected UK sales</p>
+      </div>
+      <fieldset data-required="returnFrequency">
+        <legend>How often will the business file VAT returns?</legend>
+        <div class="choice"><input type="radio" name="returnFrequency" id="rf-q" value="Quarterly"><label for="rf-q">Quarterly</label></div>
+        <div class="choice"><input type="radio" name="returnFrequency" id="rf-m" value="Monthly"><label for="rf-m">Monthly</label></div>
+        <div class="choice"><input type="radio" name="returnFrequency" id="rf-a" value="Annually"><label for="rf-a">Annually</label></div>
+        <p class="field-error">Select how often the business will file VAT returns</p>
+      </fieldset>
+      <div class="actions"><button type="submit">Continue</button></div>
+    </form>
+  </section>
+
+  <!-- CHANNELS (the unexpected question) -->
+  <section data-step="channels" data-title="How the business sells" data-auth>
+    <h1>How the business sells</h1>
+    <div class="error-summary" role="alert"></div>
+    <form data-save novalidate>
+      <fieldset data-required="marketplace">
+        <legend>Does the business sell to UK customers through an online marketplace, such as Amazon or eBay?</legend>
+        <p class="hint">If it does, the marketplace may have to account for the VAT on some of those sales</p>
+        <div class="choice"><input type="radio" name="marketplace" id="mp-no" value="No, only through its own online shop"><label for="mp-no">No, only through its own online shop</label></div>
+        <div class="choice"><input type="radio" name="marketplace" id="mp-some" value="Yes, partly through an online marketplace"><label for="mp-some">Yes, partly through an online marketplace</label></div>
+        <div class="choice"><input type="radio" name="marketplace" id="mp-only" value="Yes, only through an online marketplace"><label for="mp-only">Yes, only through an online marketplace</label></div>
+        <p class="field-error">Select how the business sells to UK customers</p>
+      </fieldset>
+      <div class="actions"><button type="submit">Continue</button></div>
+    </form>
+  </section>
+
+  <!-- CONTACT -->
+  <section data-step="contact" data-title="Contact and applicant" data-auth>
+    <h1>Contact and applicant</h1>
+    <div class="error-summary" role="alert"></div>
+    <form data-save novalidate>
+      <div class="field">
+        <label for="contactEmail">Email address for VAT letters and questions</label>
+        <input type="email" id="contactEmail" name="contactEmail" required>
+        <p class="field-error">Enter an email address</p>
+      </div>
+      <div class="field">
+        <label for="contactPhone">Contact phone number</label>
+        <input type="tel" id="contactPhone" name="contactPhone" class="short" required>
+        <p class="field-error">Enter a phone number</p>
+      </div>
+      <div class="field">
+        <label for="applicantName">Full name of the person making this application</label>
+        <input type="text" id="applicantName" name="applicantName" required>
+        <p class="field-error">Enter the applicant's full name</p>
+      </div>
+      <div class="field">
+        <label for="applicantRole">Their role in the company</label>
+        <p class="hint">For example, director</p>
+        <input type="text" id="applicantRole" name="applicantRole" class="short" required>
+        <p class="field-error">Enter the applicant's role</p>
+      </div>
+      <div class="actions"><button type="submit">Continue</button></div>
+    </form>
+  </section>
+
+  <!-- PERSONAL AND BANK (left for the person) -->
+  <section data-step="personal" data-title="Personal and bank details" data-auth>
+    <h1>Personal and bank details</h1>
+    <div class="note warn">Practice form: use made-up values only. These fields are for the person making the application, so they may be left empty for now and completed before submitting.</div>
+    <form data-save data-optional novalidate>
+      <div class="field">
+        <label for="dob">Applicant's date of birth</label>
+        <input type="date" id="dob" name="dob" class="short">
+      </div>
+      <div class="field">
+        <label for="idNumber">Applicant's passport or ID card number</label>
+        <input type="text" id="idNumber" name="idNumber" class="short" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="accountHolder">Bank account holder name</label>
+        <input type="text" id="accountHolder" name="accountHolder" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="iban">IBAN</label>
+        <input type="text" id="iban" name="iban" autocomplete="off">
+      </div>
+      <div class="actions"><button type="submit">Continue</button></div>
+    </form>
+  </section>
+
+  <!-- CHECK YOUR ANSWERS -->
+  <section data-step="check" data-title="Check your answers" data-auth>
+    <h1>Check your answers before submitting</h1>
+    <div class="error-summary" role="alert" id="check-error"></div>
+    <dl class="summary" id="summary"></dl>
+    <h2>Declaration</h2>
+    <div class="choice">
+      <input type="checkbox" id="declaration">
+      <label for="declaration">I confirm that the information I've given is correct and complete, and that I am authorised to make this application for the business.</label>
+    </div>
+    <div class="actions">
+      <button type="button" id="submit-application">Submit application</button>
+    </div>
+  </section>
+
+  <!-- DONE -->
+  <section data-step="done" data-title="Application submitted (practice)">
+    <h1>Practice application submitted</h1>
+    <p>Your practice reference:</p>
+    <p class="ref" id="reference"></p>
+    <p id="submitted-at"></p>
+    <div class="note">Nothing was sent anywhere: this was a practice form. In a real registration, HMRC would now review the application and write to the contact email address.</div>
+    <div class="actions"><button type="button" class="secondary" id="restart">Start a new practice application</button></div>
+  </section>
+</div>
+</main>
+<footer>UK Desk practice form · DTU course demo · All data stays in this browser tab and is cleared when you sign out</footer>
+
+<script>
+(function () {
+  "use strict";
+  var PRACTICE_USER = "PRACTICE-USER";
+  var PRACTICE_PASSWORD = "practice-2026";
+  var PRACTICE_CODE = "246810";
+  var KEY = "ukdesk-practice-vat-v1";
+  var ORDER = ["start", "signin", "code", "establishment", "company", "trading", "channels", "contact", "personal", "check", "done"];
+  var QUESTION_STEPS = ["establishment", "company", "trading", "channels", "contact", "personal"];
+  var LABELS = {
+    establishment: ["Where the business is established", "establishment"],
+    businessType: ["Type of business", "establishment"],
+    legalName: ["Company's legal name", "company"],
+    country: ["Country of incorporation", "company"],
+    homeTaxId: ["Home-country registration or tax number", "company"],
+    address: ["Registered address", "company"],
+    activity: ["Main activity", "trading"],
+    firstSale: ["Date of first UK sale", "trading"],
+    turnover: ["Expected UK sales, next 12 months (£)", "trading"],
+    returnFrequency: ["VAT return frequency", "trading"],
+    marketplace: ["Sells through an online marketplace", "channels"],
+    contactEmail: ["Contact email", "contact"],
+    contactPhone: ["Contact phone", "contact"],
+    applicantName: ["Applicant", "contact"],
+    applicantRole: ["Applicant's role", "contact"],
+    dob: ["Applicant's date of birth", "personal"],
+    idNumber: ["Passport or ID number", "personal"],
+    accountHolder: ["Bank account holder", "personal"],
+    iban: ["IBAN", "personal"]
+  };
+  var PERSONAL = ["dob", "idNumber", "accountHolder", "iban"];
+
+  var state = { signedIn: false, answers: {}, submitted: null };
+  try {
+    var saved = window.sessionStorage.getItem(KEY);
+    if (saved) { state = Object.assign(state, JSON.parse(saved)); }
+  } catch (e) { /* storage unavailable: keep state in memory */ }
+  function persist() {
+    try { window.sessionStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  }
+
+  var sections = {};
+  Array.prototype.forEach.call(document.querySelectorAll("section[data-step]"), function (s) { sections[s.dataset.step] = s; });
+
+  function needsAuth(step) { return sections[step] && sections[step].hasAttribute("data-auth"); }
+
+  function fillInputs(section) {
+    Array.prototype.forEach.call(section.querySelectorAll("input[name], textarea[name], select[name]"), function (el) {
+      var v = state.answers[el.name];
+      if (v === undefined) { return; }
+      if (el.type === "radio") { el.checked = (el.value === v); } else { el.value = v; }
+    });
+  }
+
+  function show(step, push) {
+    if (!sections[step]) { step = "start"; }
+    if (needsAuth(step) && !state.signedIn) { step = "signin"; }
+    if (step === "done" && !state.submitted) { step = state.signedIn ? "check" : "start"; }
+    Object.keys(sections).forEach(function (k) { sections[k].classList.toggle("active", k === step); });
+    var sec = sections[step];
+    document.title = sec.dataset.title + " - Practice VAT Registration";
+    var qi = QUESTION_STEPS.indexOf(step);
+    document.getElementById("progress").textContent = qi >= 0 ? "Step " + (qi + 1) + " of " + QUESTION_STEPS.length : "";
+    document.getElementById("signout").hidden = !state.signedIn;
+    if (step === "check") { renderSummary(); }
+    if (step === "done") { renderDone(); }
+    fillInputs(sec);
+    if (push !== false && location.hash !== "#" + step) { history.pushState(null, "", "#" + step); }
+    var h = sec.querySelector("h1");
+    if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }
+    window.scrollTo(0, 0);
+  }
+
+  function next(step) { return ORDER[ORDER.indexOf(step) + 1]; }
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-go]"), function (b) {
+    b.addEventListener("click", function () { show(b.dataset.go); });
+  });
+
+  document.getElementById("form-signin").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var ok = document.getElementById("userId").value.trim() === PRACTICE_USER &&
+             document.getElementById("password").value === PRACTICE_PASSWORD;
+    document.getElementById("signin-error").classList.toggle("show", !ok);
+    if (ok) {
+      document.getElementById("password").value = "";
+      show("code");
+    }
+  });
+
+  document.getElementById("form-code").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var ok = document.getElementById("securityCode").value.trim() === PRACTICE_CODE;
+    document.getElementById("code-error").classList.toggle("show", !ok);
+    if (ok) {
+      document.getElementById("securityCode").value = "";
+      state.signedIn = true;
+      persist();
+      show("establishment");
+    }
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll("form[data-save]"), function (form) {
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var section = form.closest("section");
+      var optional = form.hasAttribute("data-optional");
+      var errors = [];
+      Array.prototype.forEach.call(form.querySelectorAll(".field, fieldset"), function (box) {
+        box.classList.remove("invalid");
+      });
+      Array.prototype.forEach.call(form.querySelectorAll("input[name]:not([type=radio]), textarea[name], select[name]"), function (el) {
+        var v = el.value.trim();
+        var bad = !optional && el.required && (!v || (el.type === "email" && v.indexOf("@") < 1));
+        if (bad) {
+          el.closest(".field").classList.add("invalid");
+          errors.push(el.closest(".field").querySelector(".field-error").textContent);
+        } else {
+          state.answers[el.name] = v;
+        }
+      });
+      Array.prototype.forEach.call(form.querySelectorAll("fieldset[data-required]"), function (fs) {
+        var name = fs.dataset.required;
+        var picked = form.querySelector("input[name='" + name + "']:checked");
+        if (!picked) {
+          fs.classList.add("invalid");
+          errors.push(fs.querySelector(".field-error").textContent);
+        } else {
+          state.answers[name] = picked.value;
+        }
+      });
+      var summary = section.querySelector(".error-summary");
+      if (summary) {
+        summary.innerHTML = errors.length ? "<strong>There is a problem</strong><br>" + errors.join("<br>") : "";
+        summary.classList.toggle("show", errors.length > 0);
+      }
+      persist();
+      if (!errors.length) { show(state.returnToCheck ? "check" : next(section.dataset.step)); state.returnToCheck = false; persist(); }
+    });
+  });
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; });
+  }
+
+  function renderSummary() {
+    var dl = document.getElementById("summary");
+    var html = "";
+    Object.keys(LABELS).forEach(function (k) {
+      var v = state.answers[k];
+      var shown = v ? esc(v) : '<span class="missing">Not answered</span>';
+      html += "<dt>" + esc(LABELS[k][0]) + "</dt><dd>" + shown + '</dd><dd class="change"><button type="button" class="link" data-change="' +
+              LABELS[k][1] + '">Change<span class="visually-hidden"> ' + esc(LABELS[k][0]) + "</span></button></dd>";
+    });
+    dl.innerHTML = html;
+    Array.prototype.forEach.call(dl.querySelectorAll("[data-change]"), function (b) {
+      b.addEventListener("click", function () { state.returnToCheck = true; persist(); show(b.dataset.change); });
+    });
+    document.getElementById("check-error").classList.remove("show");
+  }
+
+  document.getElementById("submit-application").addEventListener("click", function () {
+    var missing = Object.keys(LABELS).filter(function (k) { return !state.answers[k]; }).map(function (k) { return LABELS[k][0]; });
+    var declared = document.getElementById("declaration").checked;
+    var box = document.getElementById("check-error");
+    var msgs = [];
+    if (missing.length) { msgs.push("Answer every question before submitting. Missing: " + missing.join(", ")); }
+    if (!declared) { msgs.push("Tick the declaration to confirm the information is correct"); }
+    box.innerHTML = msgs.length ? "<strong>There is a problem</strong><br>" + msgs.map(esc).join("<br>") : "";
+    box.classList.toggle("show", msgs.length > 0);
+    if (msgs.length) { box.scrollIntoView({ block: "center" }); return; }
+    var ref = "PRACTICE-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+    state.submitted = { ref: ref, at: new Date().toLocaleString("en-GB") };
+    PERSONAL.forEach(function (k) { delete state.answers[k]; });
+    persist();
+    show("done");
+  });
+
+  function renderDone() {
+    document.getElementById("reference").textContent = state.submitted.ref;
+    document.getElementById("submitted-at").textContent = "Submitted " + state.submitted.at + " (practice).";
+  }
+
+  function reset() {
+    state = { signedIn: false, answers: {}, submitted: null };
+    try { window.sessionStorage.removeItem(KEY); } catch (e) { /* ignore */ }
+    Array.prototype.forEach.call(document.querySelectorAll("form"), function (f) { f.reset(); });
+    document.getElementById("declaration").checked = false;
+    show("start");
+  }
+  document.getElementById("signout").addEventListener("click", reset);
+  document.getElementById("restart").addEventListener("click", reset);
+
+  window.addEventListener("popstate", function () { show((location.hash || "#start").slice(1), false); });
+  show((location.hash || "#start").slice(1), false);
+})();
+</script>
+<style>.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }</style>
+</body>
+</html>

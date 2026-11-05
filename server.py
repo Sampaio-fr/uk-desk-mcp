@@ -11,6 +11,8 @@ Tools
                  observation and link it to related memories (edge only if score >= 0.6).
                  Storage is the Memory tab in the sheet.
 - memory_recall  Simple typed memory, read path: rank memories for a query.
+- tariff_rate    Live UK duty rates per customs code from the UK Trade Tariff (public API, cached 24 h).
+- rules_check    Has a GOV.UK page we rely on changed? (GOV.UK Content API: date + change notes.)
 - list_rules     The rules and example rates this server applies.
 
 Environment variables (set them in Prefect Horizon):
@@ -26,8 +28,10 @@ Deploy on Prefect Horizon with entrypoint server.py:mcp
 import math
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date as Date
+from datetime import datetime, timezone
 
 import httpx
 from fastmcp import FastMCP
@@ -406,6 +410,25 @@ def _hmrc_notice(inp: dict) -> dict:
     return dict(answer="other", confidence=0.5, reasons=["no clear HMRC notice type"], alternatives=[])
 
 
+def _rule_change_impact(inp: dict) -> dict:
+    t = f"{inp.get('page_title', '')} {inp.get('change_note', '')}".lower()
+    urgent = _has(t, ["with immediate effect", "from today", "now in force", "no longer", "abolish", "withdrawn", "has been removed"])
+    update = _has(t, ["threshold", "£", "rate", "%", "fee", "charge", "increase", "decrease", "new requirement", "must ", "deadline",
+                      "from 1 ", "amended", "changed the", "updated the rules", "registration", "evidence", "declaration"])
+    trivial = _has(t, ["typo", "formatting", "broken link", "updated link", "links", "welsh", "translation", "accessibility", "minor"])
+    if urgent:
+        return dict(answer="urgent", confidence=0.75, reasons=[f"says: {', '.join(urgent)}"],
+                    alternatives=[{"answer": "update_needed", "confidence": 0.25}])
+    if update and not trivial:
+        return dict(answer="update_needed", confidence=0.75, reasons=[f"mentions: {', '.join(update[:4])}"],
+                    alternatives=[{"answer": "fyi", "confidence": 0.25}])
+    if trivial:
+        return dict(answer="none", confidence=0.85, reasons=[f"only: {', '.join(trivial)}"],
+                    alternatives=[{"answer": "fyi", "confidence": 0.15}])
+    return dict(answer="fyi", confidence=0.6, reasons=["no clear rule change in the note: a person should read it"],
+                alternatives=[{"answer": "update_needed", "confidence": 0.3}])
+
+
 KINDS = {
     "uk_shipping_status": _uk_shipping_status,
     "brand_fit": _brand_fit,
@@ -415,6 +438,7 @@ KINDS = {
     "return_condition": _return_condition,
     "reply_intent": _reply_intent,
     "hmrc_notice": _hmrc_notice,
+    "rule_change_impact": _rule_change_impact,
 }
 
 
@@ -468,6 +492,15 @@ D1_CHOICES = {
             "vat_number_issued": "The company is registered: the email gives or mentions the UK VAT number or certificate.",
             "rejected_or_problem": "HMRC refused, cancelled or cannot process the application.",
             "other": "Anything else, for example general news or a newsletter.",
+        },
+    ),
+    "rule_change_impact": (
+        "A UK government page that an export desk relies on was changed. What does the change mean for the desk?",
+        {
+            "none": "No effect: only wording, links, formatting or translations changed.",
+            "fyi": "Worth knowing, but nothing the desk does, charges or tells customers needs to change.",
+            "update_needed": "A rule, rate, threshold, form question, document or process the desk relies on changed: a rule or document must be updated.",
+            "urgent": "A change that is already in force, or starts within 30 days, and affects prices, customs declarations or registrations.",
         },
     ),
 }
@@ -537,6 +570,9 @@ def _d1_answer(kind: str, inp: dict):
         instructions, options = D1_CHOICES[kind]
         if kind == "hmrc_notice":
             state = f"Subject: {inp.get('subject', '')}\n\n{inp.get('text', '')}"
+        elif kind == "rule_change_impact":
+            state = (f"The desk relies on: {inp.get('relied_on', '')}\nPage: {inp.get('page_title', '')}\n"
+                     f"Change note: {inp.get('change_note', '')}")
         else:
             state = str(inp.get("text") or inp.get("note") or "")
         out = _d1_choice(instructions, options, state)
@@ -609,6 +645,7 @@ def classify(questions: list[dict], auto_threshold: float = 0.85, code_threshold
                                                                     | vat_number_issued | rejected_or_problem | other | possible_phishing
                           The sender and scam checks are plain code and run first: an untrusted sender is always
                           possible_phishing. extracted.vat_number_candidate is read with code when the email shows one.
+      rule_change_impact  {"page_title", "change_note", "relied_on"} -> none | fyi | update_needed | urgent
     Each result has answer, confidence, alternatives, reasons and route ("auto" if confidence
     >= the threshold for that kind, else "human"). customs_code uses code_threshold.
     """
@@ -650,7 +687,9 @@ def _price_one(s: dict, fx: float) -> dict:
     dk_net_gbp = dk_price / (1 + DK_VAT) / fx
     origin = str(s.get("origin_status") or "unknown")
     code = str(s.get("customs_code") or "")
-    duty_rate = 0.0 if origin == "eu_proven" else _duty_rate(code)
+    live_rate = s.get("duty_rate")
+    live = live_rate not in (None, "")
+    duty_rate = 0.0 if origin == "eu_proven" else (float(live_rate) if live else _duty_rate(code))
     target = dk_net_gbp * (1 + duty_rate) * (1 + UK_VAT)
     price = _nearest_point(target)
     bumped = False
@@ -683,8 +722,10 @@ def _price_one(s: dict, fx: float) -> dict:
         out["flags"].append("made outside the EU: duty applies when an order is over GBP 135; budgeted in the price")
     elif origin not in ("eu_proven",):
         out["flags"].append("origin unknown: duty budgeted")
-    if duty_rate and code:
-        out["flags"].append(f"duty rate {int(duty_rate * 100)}% is an EXAMPLE rate: confirm on the UK Trade Tariff")
+    if duty_rate and live:
+        out["flags"].append(f"duty rate {_r2(duty_rate * 100)}% from the UK Trade Tariff (tariff_rate)")
+    elif duty_rate and code:
+        out["flags"].append(f"duty rate {int(duty_rate * 100)}% is an EXAMPLE rate: call tariff_rate to use the live UK Trade Tariff rate")
     if bumped:
         out["flags"].append("rounded up: the nearest price point would leave the brand under 95% of its Danish net price")
     if dk_net_gbp > LOW_VALUE_LIMIT_GBP:
@@ -704,7 +745,8 @@ def landed_cost(skus: list[dict], fx_dkk_per_gbp: float = 8.6) -> dict:
     """UK all-in prices for many SKUs in one call. Never compute VAT, duty or prices yourself.
 
     skus: [{"sku", "dk_price_dkk" (Danish price incl. 25% VAT), "customs_code", "code_status",
-            "origin_status" (eu_proven | eu_missing_proof | eu_proof_expired | non_eu), "unit_cost_dkk"}]
+            "origin_status" (eu_proven | eu_missing_proof | eu_proof_expired | non_eu), "unit_cost_dkk",
+            "duty_rate" (optional: the live third-country rate from tariff_rate, e.g. 0.12; otherwise an EXAMPLE rate is used)}]
     Rule: all-in UK price = Danish net price in GBP, plus a duty budget for goods without
     proven EU origin, plus 20% UK VAT, rounded to the nearest price point ending in 9, but never
     leaving the brand under 95% of its Danish net price. Returns flags for anything provisional.
@@ -727,7 +769,8 @@ def _check_one(o: dict, eur_per_gbp: float) -> dict:
             if origin == "eu_proven":
                 statement = True
             else:
-                d = value * _duty_rate(l.get("customs_code"))
+                rate = l.get("duty_rate")
+                d = value * (float(rate) if rate not in (None, "") else _duty_rate(l.get("customs_code")))
                 duty += d
                 if origin in ("eu_missing_proof", "eu_proof_expired"):
                     issues.append(f"{l.get('sku')}: EU-made but no valid origin proof, so duty GBP {_r2(d)} will be charged")
@@ -768,7 +811,8 @@ def check_order(orders: list[dict], eur_per_gbp: float = 1.15) -> dict:
     """Check many UK orders in one call (Great Britain only).
 
     orders: [{"order_id", "ship_mode" (DDP | DAP), "lines": [{"sku", "qty", "uk_price_gbp",
-              "origin_status", "customs_code"}]}]   uk_price_gbp = the all-in price incl. VAT.
+              "origin_status", "customs_code", "duty_rate" (optional, from tariff_rate)}]}]
+              uk_price_gbp = the all-in price incl. VAT.
     Returns per order: consignment value excl. VAT, which regime applies (GBP 135 rule), duty,
     whether a statement on origin is needed on the invoice, whether REX is needed, issues, and
     a short customs_check text to write into the UK_Orders tab.
@@ -966,6 +1010,246 @@ def memory_recall(query: str, memories: list[dict], k: int = 3, on_date: str = "
 
 
 # ---------------------------------------------------------------------------
+# tariff_rate: live UK duty rates from the UK Trade Tariff (plain code, no key)
+# ---------------------------------------------------------------------------
+TARIFF_BASES = ["https://www.trade-tariff.service.gov.uk/uk/api", "https://www.trade-tariff.service.gov.uk/api/v2"]
+TARIFF_PAGE = "https://www.trade-tariff.service.gov.uk/commodities/{code}"
+THIRD_COUNTRY_TYPES = ("103", "105")   # third country duty; non-preferential duty under end-use
+PREFERENCE_TYPES = ("142", "145")      # tariff preference; preferential suspension
+ERGA_OMNES = "1011"                    # all countries
+EU_AREA = "1013"                       # European Union
+CACHE_SECONDS = 24 * 3600              # the tariff changes at most daily: cache 24 h, as the API asks
+HTTP_HEADERS = {"User-Agent": "uk-desk-mcp (DTU course demo)", "Accept": "application/json"}
+_CACHE: dict = {}
+
+
+def _get_json(url: str) -> dict:
+    now = time.time()
+    hit = _CACHE.get(url)
+    if hit and now - hit[0] < CACHE_SECONDS:
+        return hit[1]
+    resp = httpx.get(url, timeout=20, headers=HTTP_HEADERS, follow_redirects=True)
+    resp.raise_for_status()
+    data = resp.json()
+    _CACHE[url] = (now, data)
+    return data
+
+
+def _tt(path: str) -> dict:
+    last = None
+    for base in TARIFF_BASES:
+        try:
+            return _get_json(base + path)
+        except Exception as exc:  # try the other base URL, then give up
+            last = exc
+    raise last
+
+
+def _clean(text) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", str(text or "")).replace("&nbsp;", " ")).strip()
+
+
+def _parse_duty(text) -> tuple:
+    """'12.00 %' -> 0.12. Returns (rate or None, has a specific part like GBP/100 kg, clean text)."""
+    clean = _clean(text)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*%", clean)
+    rate = round(float(m.group(1)) / 100, 4) if m else None
+    specific = bool(re.search(r"\b(GBP|EUR)\b|/\s*\d*\s*(kg|l|item|p/st|m2|m)\b", clean, re.I))
+    if rate is None and not specific and re.fullmatch(r"0(\.0+)?", clean or "x"):
+        rate = 0.0
+    return rate, specific, clean
+
+
+def _rel_id(obj: dict, name: str):
+    data = ((obj.get("relationships") or {}).get(name) or {}).get("data")
+    return str(data.get("id")) if isinstance(data, dict) and data.get("id") is not None else None
+
+
+def _commodity_rates(code10: str) -> dict:
+    data = _tt(f"/commodities/{code10}")
+    item = data.get("data") or {}
+    attrs = item.get("attributes") or {}
+    idx = {(i.get("type"), str(i.get("id"))): i for i in data.get("included") or []}
+    ids = [str(x.get("id")) for x in ((item.get("relationships") or {}).get("import_measures") or {}).get("data") or []]
+    measures = [idx.get(("measure", i)) for i in ids] if ids else [v for (t, _), v in idx.items() if t == "measure"]
+    third, pref = [], []
+    for m in measures:
+        if not m:
+            continue
+        mtype, area = _rel_id(m, "measure_type"), _rel_id(m, "geographical_area")
+        dexp = idx.get(("duty_expression", _rel_id(m, "duty_expression") or "")) or {}
+        dattrs = dexp.get("attributes") or {}
+        parsed = _parse_duty(dattrs.get("base") or dattrs.get("formatted_base"))
+        if mtype in THIRD_COUNTRY_TYPES and area in (ERGA_OMNES, None):
+            third.append((THIRD_COUNTRY_TYPES.index(mtype), parsed))
+        elif mtype in PREFERENCE_TYPES and area == EU_AREA:
+            pref.append(parsed)
+    if not third and attrs.get("basic_duty_rate"):
+        third.append((0, _parse_duty(attrs.get("basic_duty_rate"))))
+    third.sort(key=lambda t: t[0])
+    tc = third[0][1] if third else (None, False, "")
+    eu = min((p for p in pref if p[0] is not None), default=(None, False, ""), key=lambda p: p[0])
+    return {
+        "commodity": code10,
+        "description": _clean(attrs.get("description") or attrs.get("formatted_description"))[:120],
+        "third_country_duty": tc[0],
+        "third_country_text": tc[2],
+        "has_specific_duty": tc[1],
+        "eu_preferential_duty": eu[0],
+    }
+
+
+def _leaf_codes(digits: str, max_leaves: int) -> tuple:
+    """10-digit commodity codes under a 6- or 8-digit code (from the heading), plus a note."""
+    if len(digits) >= 10:
+        return [digits[:10]], ""
+    try:
+        data = _tt(f"/headings/{digits[:4]}")
+        cands = []
+        for inc in data.get("included") or []:
+            if inc.get("type") != "commodity":
+                continue
+            a = inc.get("attributes") or {}
+            gid = str(a.get("goods_nomenclature_item_id") or "")
+            if gid.startswith(digits) and str(a.get("producline_suffix") or "80") == "80":
+                cands.append((gid, a.get("leaf"), a.get("declarable")))
+        flagged = [g for g, leaf, decl in cands if leaf is True or decl is True]
+        ids = [g for g, _, _ in cands]
+        leaves = flagged or [g for g in ids if not any(o != g and o.startswith(g.rstrip("0") or g) for o in ids)]
+        leaves = sorted(set(leaves))
+        if leaves:
+            note = f"{len(leaves)} UK commodity codes under {digits}" + (f"; first {max_leaves} checked" if len(leaves) > max_leaves else "")
+            return leaves[:max_leaves], note
+    except Exception:
+        pass
+    return [digits.ljust(10, "0")], f"heading lookup failed; tried {digits.ljust(10, '0')} directly"
+
+
+def _tariff_one(code: str, max_leaves: int) -> dict:
+    digits = re.sub(r"\D", "", str(code or ""))
+    out = {"code": code, "checked_at": Date.today().isoformat()}
+    if len(digits) < 6:
+        return {**out, "source": "none", "error": "need at least a 6-digit code"}
+    try:
+        leaves, note = _leaf_codes(digits, max_leaves)
+        rows = []
+        for c in leaves:
+            try:
+                rows.append(_commodity_rates(c))
+            except Exception as exc:
+                rows.append({"commodity": c, "error": f"{type(exc).__name__}: {str(exc)[:80]}"})
+        rates = [r["third_country_duty"] for r in rows if r.get("third_country_duty") is not None]
+        if not rates:
+            raise ValueError("no third-country duty found: " + "; ".join(r.get("error", "no measure") for r in rows)[:200])
+        eu = [r["eu_preferential_duty"] for r in rows if r.get("eu_preferential_duty") is not None]
+        return {
+            **out,
+            "source": "uk_trade_tariff",
+            "third_country_min": min(rates),
+            "third_country_max": max(rates),
+            "budget_duty_rate": max(rates),
+            "eu_preferential_duty": min(eu) if eu else None,
+            "has_specific_duty": any(r.get("has_specific_duty") for r in rows),
+            "leaves": rows,
+            "url": TARIFF_PAGE.format(code=leaves[0]),
+            "note": note + ("; rates differ between commodity codes: confirm the exact 10-digit code" if min(rates) != max(rates) else ""),
+        }
+    except Exception as exc:
+        rate = _duty_rate(digits)
+        return {**out, "source": "example", "budget_duty_rate": rate, "third_country_min": rate, "third_country_max": rate,
+                "eu_preferential_duty": 0.0, "error": f"UK Trade Tariff unavailable ({type(exc).__name__}: {str(exc)[:120]})",
+                "note": "EXAMPLE rate used: confirm on the UK Trade Tariff"}
+
+
+@mcp.tool
+def tariff_rate(codes: list[str], max_leaves: int = 8) -> dict:
+    """Live UK import duty rates from the UK Trade Tariff (GOV.UK public API, cached 24 h).
+
+    codes: customs codes as in the Catalog, e.g. "6110.11" (6-digit HS) or "6110113000" (10-digit UK).
+    For a 6- or 8-digit code it checks every 10-digit UK commodity code under it.
+    Per code: third_country_min / _max (duty for goods NOT of proven EU origin, on orders over GBP 135),
+    budget_duty_rate (the highest, to pass to landed_cost as duty_rate), eu_preferential_duty
+    (with a statement on origin), has_specific_duty, the leaves, the tariff page url, and source:
+    "uk_trade_tariff", or "example" with an error if the tariff could not be reached.
+    """
+    unique = list(dict.fromkeys(str(c) for c in codes or []))
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda c: _tariff_one(c, max_leaves), unique))
+    return {"results": results}
+
+
+# ---------------------------------------------------------------------------
+# rules_check: has a GOV.UK page we rely on changed? (GOV.UK Content API, plain code)
+# ---------------------------------------------------------------------------
+GOVUK = "https://www.gov.uk"
+
+
+def _ts(value):
+    if not value:
+        return None
+    s = str(value).strip().replace("Z", "+00:00")
+    if len(s) == 10:
+        s += "T00:00:00+00:00"
+    try:
+        t = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def _rules_one(src: dict) -> dict:
+    rid = src.get("rule_id")
+    raw = str(src.get("path") or src.get("url") or "").strip()
+    m = re.match(r"https?://([^/]+)(/[^?#]*)?", raw)
+    if m and m.group(1).lower() not in ("www.gov.uk", "gov.uk"):
+        return {"rule_id": rid, "status": "not_govuk", "url": raw, "note": "not a GOV.UK page: check it with a web search"}
+    path = (m.group(2) if m else raw.split("?")[0].split("#")[0]) or ""
+    if not path.startswith("/"):
+        path = "/" + path
+    out = {"rule_id": rid, "url": GOVUK + path}
+    try:
+        data = _get_json(f"{GOVUK}/api/content{path}")
+    except Exception as exc:
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        if code in (404, 410):
+            return {**out, "status": "not_found", "note": "page moved or withdrawn: search GOV.UK for its new address"}
+        return {**out, "status": "error", "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+    updated = data.get("public_updated_at") or data.get("updated_at")
+    history = (data.get("details") or {}).get("change_history") or data.get("change_history") or []
+    seen = _ts(src.get("last_seen_update"))
+    upd = _ts(updated)
+    notes = []
+    for h in history:
+        t = _ts(h.get("public_timestamp"))
+        if seen is None or (t and t > seen):
+            notes.append({"date": str(h.get("public_timestamp", ""))[:10], "note": _clean(h.get("note"))[:300]})
+    notes.sort(key=lambda n: n["date"], reverse=True)
+    if seen is None:
+        status = "first_check"
+    elif upd and upd > seen:
+        status = "changed"
+    else:
+        status = "unchanged"
+    return {**out, "status": status, "title": data.get("title"), "public_updated_at": updated,
+            "new_change_notes": notes[:5] if status != "unchanged" else []}
+
+
+@mcp.tool
+def rules_check(sources: list[dict]) -> dict:
+    """Check whether the GOV.UK pages UK Desk relies on have changed (GOV.UK Content API, plain code).
+
+    sources: [{"rule_id", "path" (a GOV.UK path like "/goods-sent-from-abroad", or a full gov.uk URL),
+               "last_seen_update" (the public_updated_at you stored last time, or empty)}]
+    Per source: status = changed | unchanged | first_check | not_found | not_govuk | error, the title,
+    public_updated_at (store it as last_seen_update), new change notes since last time, and the url.
+    Pass each changed note to classify (kind rule_change_impact) to judge the impact.
+    """
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(_rules_one, sources or []))
+    return {"checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "results": results}
+
+
+# ---------------------------------------------------------------------------
 @mcp.tool
 def list_rules() -> dict:
     """The rules and EXAMPLE rates this server applies (Great Britain only)."""
@@ -981,7 +1265,8 @@ def list_rules() -> dict:
         "default_duty_rate": DEFAULT_DUTY_RATE,
         "pricing": "nearest price point ending in 9; brand keeps at least 95% of its Danish net price",
         "memory_edge_threshold": EDGE_THRESHOLD,
-        "warning": "Simplified course-demo rules. EXAMPLE rates must be confirmed on the UK Trade Tariff.",
+        "live_sources": "tariff_rate reads live duty rates from the UK Trade Tariff; rules_check watches the GOV.UK pages behind these rules",
+        "warning": "Simplified course-demo rules. EXAMPLE rates are only used when tariff_rate cannot reach the UK Trade Tariff.",
     }
 
 

@@ -9,6 +9,8 @@ Small MCP server for the **UK Desk** agent (DTU course demo).
 | `check_order` | Per order: the £135 rule, duty, statement on origin, REX, DAP mistakes | Plain code |
 | `stage3_check` | Monthly break-even for the shared UK warehouse | Plain code |
 | `memory_plan` / `memory_recall` | Simple typed memory (episodic, semantic, procedural, preference) with links when the score is 0.6 or more; storage is the `Memory` tab | Rules, inspired by the Jev-Mem paper (no model) |
+| `tariff_rate` | Live UK import duty per customs code (third-country rate, EU preference) from the UK Trade Tariff, cached 24 h | Plain code (GOV.UK public API). Falls back to the EXAMPLE rate, and says so, if the tariff can't be reached |
+| `rules_check` | Has a GOV.UK page we rely on changed? Returns the update date and new change notes | Plain code (GOV.UK Content API). The impact is then judged by `classify` (`rule_change_impact`, d1) |
 | `list_rules` | Shows the rules and EXAMPLE rates | — |
 
 Scope: Great Britain only. Rates marked EXAMPLE must be checked on the UK Trade Tariff before real use.
@@ -40,6 +42,17 @@ Scope: Great Britain only. Rates marked EXAMPLE must be checked on the UK Trade 
 3. Set all seven tools to **Auto**. They only answer and calculate; they cannot send or change anything.
 
 ## Quick tests in the Fleet chat
+
+```
+Call tariff_rate with codes ["6110.11", "6117.10"]
+```
+Expect `source: uk_trade_tariff`, a third-country rate per code and `eu_preferential_duty` 0. If it says `source: example` with an error, the server could not reach the UK Trade Tariff.
+
+```
+Call rules_check with sources [{"rule_id": "t", "path": "/goods-sent-from-abroad", "last_seen_update": ""}]
+```
+Expect `status: first_check` with a title and `public_updated_at`.
+
 
 ```
 Call classify with one question: id "t1", kind "uk_shipping_status",
